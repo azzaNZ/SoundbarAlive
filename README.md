@@ -1,6 +1,8 @@
 # SoundBarKeepAlive
 
-**Keep your soundbar or speakers awake — even when your PC is silent or muted.**
+Author's note: I built this specifically for the Philips HTL3320 Soundbar which annoyingly turns off after 15 minutes of sound inactivity due to EU regulations and cannot be turned off. 
+
+**Keep your soundbar or speakers awake â€” even when your PC is silent or muted.**
 
 `SoundBarKeepAlive` is a lightweight Windows tray application that plays an inaudible silent tone every 10 minutes to prevent soundbars, monitors, or powered speakers from going into standby or "sleep mode" due to inactivity.  
 
