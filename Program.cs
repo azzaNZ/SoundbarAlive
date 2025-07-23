@@ -5,6 +5,7 @@ using System.Media;
 using System.Windows.Forms;
 using System.Drawing;
 using Microsoft.Win32;
+using NAudio.CoreAudioApi;
 
 namespace SoundBarKeepAlive
 {
@@ -15,6 +16,7 @@ namespace SoundBarKeepAlive
         private readonly TimeSpan _interval = TimeSpan.FromMinutes(10);
         private DateTime _lastPlayed = DateTime.MinValue;
         private int _playCount = 0;
+        private readonly MMDeviceEnumerator _deviceEnumerator = new MMDeviceEnumerator();
 
         public SoundBarApp()
         {
@@ -30,8 +32,6 @@ namespace SoundBarKeepAlive
             this.Visible = false;
             this.Text = "SoundBar KeepAlive";
             this.Size = new Size(300, 200);
-
-            // Hide the form immediately
             this.Load += (s, e) => this.Hide();
         }
 
@@ -42,7 +42,6 @@ namespace SoundBarKeepAlive
             _notifyIcon.Text = "SoundBar KeepAlive - Next play: calculating...";
             _notifyIcon.Visible = true;
 
-            // Create context menu
             var contextMenu = new ContextMenuStrip();
 
             var statusItem = new ToolStripMenuItem("Status");
@@ -80,15 +79,12 @@ namespace SoundBarKeepAlive
 
         private void StartTimer()
         {
-            // Start immediately, then repeat every 10 minutes
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = (int)_interval.TotalMilliseconds;
             _timer.Tick += (s, e) => PlaySilentSound();
             _timer.Start();
 
-            // Play immediately on startup
             PlaySilentSound();
-
             UpdateTooltip();
         }
 
@@ -96,20 +92,35 @@ namespace SoundBarKeepAlive
         {
             try
             {
-                // Generate a very quiet sine wave for 20 seconds
+                var device = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                float currentVolume = device.AudioEndpointVolume.MasterVolumeLevelScalar; // 0.0–1.0
+                bool isMuted = device.AudioEndpointVolume.Mute;
+
+                // If already audible, do nothing
+                if (!isMuted && currentVolume > 0.001f)
+                {
+                    return;
+                }
+
+                // Save current state
+                float originalVolume = currentVolume;
+                bool originalMute = isMuted;
+
+                // Temporarily unmute and set volume to 50%
+                device.AudioEndpointVolume.Mute = false;
+                device.AudioEndpointVolume.MasterVolumeLevelScalar = 0.5f;
+
+                // Generate silent audio
                 int sampleRate = 44100;
-                int channels = 2; // Stereo
-                int duration = 8; // seconds
+                int channels = 2;
+                int duration = 8;
 
-                // Create a very quiet 1000 Hz tone
                 byte[] audioData = GenerateSilentTone(sampleRate, channels, duration);
-
-                // Create a temporary WAV file
                 string tempFile = Path.GetTempFileName() + ".wav";
                 WriteWavFile(tempFile, audioData, sampleRate, channels);
 
-                // Play the sound in a separate thread to avoid blocking
-                ThreadPool.QueueUserWorkItem(_ => {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
                     try
                     {
                         using (var player = new SoundPlayer(tempFile))
@@ -119,13 +130,16 @@ namespace SoundBarKeepAlive
                         File.Delete(tempFile);
                     }
                     catch { }
+
+                    // Restore original volume and mute
+                    device.AudioEndpointVolume.MasterVolumeLevelScalar = originalVolume;
+                    device.AudioEndpointVolume.Mute = originalMute;
                 });
 
                 _lastPlayed = DateTime.Now;
                 _playCount++;
                 UpdateTooltip();
 
-                // Show a brief notification (optional)
                 _notifyIcon.ShowBalloonTip(2000, "SoundBar KeepAlive",
                     $"Silent sound played ({_playCount} times total)", ToolTipIcon.Info);
             }
@@ -154,9 +168,7 @@ namespace SoundBarKeepAlive
         private byte[] GenerateSilentTone(int sampleRate, int channels, int duration)
         {
             int totalSamples = sampleRate * channels * duration;
-            byte[] audioData = new byte[totalSamples * 2]; // 16-bit samples
-
-            return audioData;
+            return new byte[totalSamples * 2]; // Silence (16-bit PCM)
         }
 
         private void WriteWavFile(string filename, byte[] audioData, int sampleRate, int channels)
@@ -164,22 +176,19 @@ namespace SoundBarKeepAlive
             using (var fs = new FileStream(filename, FileMode.Create))
             using (var writer = new BinaryWriter(fs))
             {
-                // WAV header
                 writer.Write("RIFF".ToCharArray());
                 writer.Write(36 + audioData.Length);
                 writer.Write("WAVE".ToCharArray());
 
-                // fmt chunk
                 writer.Write("fmt ".ToCharArray());
-                writer.Write(16); // chunk size
-                writer.Write((short)1); // PCM format
+                writer.Write(16);
+                writer.Write((short)1);
                 writer.Write((short)channels);
                 writer.Write(sampleRate);
-                writer.Write(sampleRate * channels * 2); // byte rate
-                writer.Write((short)(channels * 2)); // block align
-                writer.Write((short)16); // bits per sample
+                writer.Write(sampleRate * channels * 2);
+                writer.Write((short)(channels * 2));
+                writer.Write((short)16);
 
-                // data chunk
                 writer.Write("data".ToCharArray());
                 writer.Write(audioData.Length);
                 writer.Write(audioData);
@@ -253,6 +262,7 @@ namespace SoundBarKeepAlive
             {
                 _timer?.Dispose();
                 _notifyIcon?.Dispose();
+                _deviceEnumerator?.Dispose();
             }
             base.Dispose(disposing);
         }
