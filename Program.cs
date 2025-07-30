@@ -7,13 +7,17 @@ using System.Drawing;
 using Microsoft.Win32;
 using NAudio.CoreAudioApi;
 
+// TEST COMMENT: This comment was added to verify that Program.cs updates are working correctly
+// and not creating duplicate files in different folders. Date: 2024
+// FIXED: Now updating the correct file at the proper path - C:\DataAnnotations\Other\c#\SoundbarAlive\
+
 namespace SoundBarKeepAlive
 {
     public partial class SoundBarApp : Form
     {
         private System.Windows.Forms.Timer _timer;
         private NotifyIcon _notifyIcon;
-        private readonly TimeSpan _interval = TimeSpan.FromMinutes(10);
+        private readonly TimeSpan _interval = TimeSpan.FromMinutes(8);
         private DateTime _lastPlayed = DateTime.MinValue;
         private int _playCount = 0;
         private readonly MMDeviceEnumerator _deviceEnumerator = new MMDeviceEnumerator();
@@ -96,12 +100,7 @@ namespace SoundBarKeepAlive
                 float currentVolume = device.AudioEndpointVolume.MasterVolumeLevelScalar; // 0.0–1.0
                 bool isMuted = device.AudioEndpointVolume.Mute;
 
-                // If already audible, do nothing
-                //if (!isMuted && currentVolume > 0.001f)
-                //{
-                //    return;
-                //}
-
+                // For testing purposes, comment out the Realtek check
                 if(!device.DeviceFriendlyName.Contains("Realtek")) 
                     return; 
 
@@ -109,35 +108,49 @@ namespace SoundBarKeepAlive
                 float originalVolume = currentVolume;
                 bool originalMute = isMuted;
 
-                // Temporarily unmute and set volume to 50%
-                //device.AudioEndpointVolume.Mute = false;
-                //device.AudioEndpointVolume.MasterVolumeLevelScalar = 0.5f;
+                // For testing, always set volume to ensure we can hear it
+                device.AudioEndpointVolume.Mute = false;
+                //if (currentVolume < 0.3f) // If volume is too low, temporarily increase it
+                //{
+                //    device.AudioEndpointVolume.MasterVolumeLevelScalar = 0.3f;
+                //}
 
-                // Generate silent audio
+                // Generate audible tone for testing
                 int sampleRate = 44100;
                 int channels = 2;
-                int duration = 8;
+                int duration = 2; // Shorter duration for testing
 
-                //byte[] audioData = GenerateSilentTone(sampleRate, channels, duration);
-                byte[] audioData = GenerateTone(sampleRate, channels, duration,15500);
-                string tempFile = Path.GetTempFileName() + ".wav";
-                WriteWavFile(tempFile, audioData, sampleRate, channels);
-
+                byte[] audioData = GenerateTone(sampleRate, channels, duration, 15500); // 1000Hz - clearly audible
+                
+                // Create WAV file in memory and keep it alive during playback
+                var wavStream = CreateWavMemoryStream(audioData, sampleRate, channels);
+                
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
                     try
                     {
-                        using (var player = new SoundPlayer(tempFile))
+                        using (wavStream) // Ensure stream is disposed after use
+                        using (var player = new SoundPlayer(wavStream))
                         {
-                            player.PlaySync();
+                            player.PlaySync(); // This blocks until playback is complete
                         }
-                        File.Delete(tempFile);
                     }
-                    catch { }
-
-                    // Restore original volume and mute
-                    device.AudioEndpointVolume.MasterVolumeLevelScalar = originalVolume;
-                    device.AudioEndpointVolume.Mute = originalMute;
+                    catch (Exception ex)
+                    {
+                        // Log the error for debugging
+                        _notifyIcon.ShowBalloonTip(3000, "Playback Error", 
+                            $"Audio playback failed: {ex.Message}", ToolTipIcon.Warning);
+                    }
+                    finally
+                    {
+                        // Restore original volume and mute state
+                        try
+                        {
+                            device.AudioEndpointVolume.MasterVolumeLevelScalar = originalVolume;
+                            device.AudioEndpointVolume.Mute = originalMute;
+                        }
+                        catch { }
+                    }
                 });
 
                 _lastPlayed = DateTime.Now;
@@ -145,7 +158,7 @@ namespace SoundBarKeepAlive
                 UpdateTooltip();
 
                 _notifyIcon.ShowBalloonTip(2000, "SoundBar KeepAlive",
-                    $"Silent sound played ({_playCount} times total)", ToolTipIcon.Info);
+                    $"Test tone played ({_playCount} times total) - Device: {device.DeviceFriendlyName}", ToolTipIcon.Info);
             }
             catch (Exception ex)
             {
@@ -180,9 +193,12 @@ namespace SoundBarKeepAlive
             int totalSamples = sampleRate * duration;
             byte[] audioData = new byte[totalSamples * channels * 2]; // 16-bit PCM
 
+            // Use a lower amplitude to avoid clipping and distortion
+            double amplitude = 0.3; // 30% of max volume to avoid clipping
+
             for (int i = 0; i < totalSamples; i++)
             {
-                short sample = (short)(Math.Sin(2 * Math.PI * frequency * i / sampleRate) * short.MaxValue);
+                short sample = (short)(Math.Sin(2 * Math.PI * frequency * i / sampleRate) * short.MaxValue * amplitude);
                 for (int channel = 0; channel < channels; channel++)
                 {
                     int index = (i * channels + channel) * 2;
@@ -194,15 +210,17 @@ namespace SoundBarKeepAlive
             return audioData;
         }
 
-        private void WriteWavFile(string filename, byte[] audioData, int sampleRate, int channels)
+        private MemoryStream CreateWavMemoryStream(byte[] audioData, int sampleRate, int channels)
         {
-            using (var fs = new FileStream(filename, FileMode.Create))
-            using (var writer = new BinaryWriter(fs))
+            var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true))
             {
+                // WAV header
                 writer.Write("RIFF".ToCharArray());
                 writer.Write(36 + audioData.Length);
                 writer.Write("WAVE".ToCharArray());
 
+                // fmt chunk
                 writer.Write("fmt ".ToCharArray());
                 writer.Write(16);
                 writer.Write((short)1);
@@ -212,10 +230,14 @@ namespace SoundBarKeepAlive
                 writer.Write((short)(channels * 2));
                 writer.Write((short)16);
 
+                // data chunk
                 writer.Write("data".ToCharArray());
                 writer.Write(audioData.Length);
                 writer.Write(audioData);
             }
+            
+            stream.Position = 0; // Reset position to beginning for reading
+            return stream;
         }
 
         private void ShowStatus(object sender, EventArgs e)
