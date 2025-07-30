@@ -97,25 +97,29 @@ namespace SoundBarKeepAlive
                 bool isMuted = device.AudioEndpointVolume.Mute;
 
                 // If already audible, do nothing
-                if (!isMuted && currentVolume > 0.001f)
-                {
-                    return;
-                }
+                //if (!isMuted && currentVolume > 0.001f)
+                //{
+                //    return;
+                //}
+
+                if(!device.DeviceFriendlyName.Contains("Realtek")) 
+                    return; 
 
                 // Save current state
                 float originalVolume = currentVolume;
                 bool originalMute = isMuted;
 
                 // Temporarily unmute and set volume to 50%
-                device.AudioEndpointVolume.Mute = false;
-                device.AudioEndpointVolume.MasterVolumeLevelScalar = 0.5f;
+                //device.AudioEndpointVolume.Mute = false;
+                //device.AudioEndpointVolume.MasterVolumeLevelScalar = 0.5f;
 
                 // Generate silent audio
                 int sampleRate = 44100;
                 int channels = 2;
                 int duration = 8;
 
-                byte[] audioData = GenerateSilentTone(sampleRate, channels, duration);
+                //byte[] audioData = GenerateSilentTone(sampleRate, channels, duration);
+                byte[] audioData = GenerateTone(sampleRate, channels, duration,15500);
                 string tempFile = Path.GetTempFileName() + ".wav";
                 WriteWavFile(tempFile, audioData, sampleRate, channels);
 
@@ -169,6 +173,25 @@ namespace SoundBarKeepAlive
         {
             int totalSamples = sampleRate * channels * duration;
             return new byte[totalSamples * 2]; // Silence (16-bit PCM)
+        }
+
+        private byte[] GenerateTone(int sampleRate, int channels, int duration, int frequency)
+        {
+            int totalSamples = sampleRate * duration;
+            byte[] audioData = new byte[totalSamples * channels * 2]; // 16-bit PCM
+
+            for (int i = 0; i < totalSamples; i++)
+            {
+                short sample = (short)(Math.Sin(2 * Math.PI * frequency * i / sampleRate) * short.MaxValue);
+                for (int channel = 0; channel < channels; channel++)
+                {
+                    int index = (i * channels + channel) * 2;
+                    audioData[index] = (byte)(sample & 0xFF);
+                    audioData[index + 1] = (byte)((sample >> 8) & 0xFF);
+                }
+            }
+
+            return audioData;
         }
 
         private void WriteWavFile(string filename, byte[] audioData, int sampleRate, int channels)
