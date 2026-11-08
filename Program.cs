@@ -6,6 +6,7 @@ using System.Windows.Forms;
 using System.Drawing;
 using Microsoft.Win32;
 using NAudio.CoreAudioApi;
+using System.Windows.Forms.VisualStyles;
 
 // TEST COMMENT: This comment was added to verify that Program.cs updates are working correctly
 // and not creating duplicate files in different folders. Date: 2024
@@ -17,7 +18,8 @@ namespace SoundBarKeepAlive
     {
         private System.Windows.Forms.Timer _timer;
         private NotifyIcon _notifyIcon;
-        private readonly TimeSpan _interval = TimeSpan.FromMinutes(8);
+        private readonly TimeSpan _interval = TimeSpan.FromMinutes(12);
+        private readonly int _frequency = 24000; // Frequency of the audible tone in Hz. 1000Hz - clearly audible    
         private DateTime _lastPlayed = DateTime.MinValue;
         private int _playCount = 0;
         private readonly MMDeviceEnumerator _deviceEnumerator = new MMDeviceEnumerator();
@@ -120,7 +122,7 @@ namespace SoundBarKeepAlive
                 int channels = 2;
                 int duration = 2; // Shorter duration for testing
 
-                byte[] audioData = GenerateTone(sampleRate, channels, duration, 15500); // 1000Hz - clearly audible
+                byte[] audioData = GenerateTone(sampleRate, channels, duration, _frequency); 
                 
                 // Create WAV file in memory and keep it alive during playback
                 var wavStream = CreateWavMemoryStream(audioData, sampleRate, channels);
